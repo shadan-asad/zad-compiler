@@ -55,7 +55,8 @@ wss.on('connection', (ws) => {
           handleUserInput(ws, data, sessionId);
           break;
         case 'stop':
-          stopExecution(sessionId);
+          console.log(`Received stop request for session ${sessionId}`);
+          stopExecution(sessionId, ws);
           break;
         default:
           console.log('Unknown message type:', data.type);
@@ -243,7 +244,7 @@ function handleUserInput(ws, data, sessionId) {
 }
 
 // Stop execution
-function stopExecution(sessionId) {
+function stopExecution(sessionId, ws = null) {
   const session = activeSessions.get(sessionId);
   if (session) {
     console.log(`Stopping execution for session ${sessionId}`);
@@ -280,6 +281,19 @@ function stopExecution(sessionId) {
         }, 500);
       } catch (err) {
         console.error('Error stopping container:', err);
+      }
+    }
+    
+    // Send stopped message to client if WebSocket is provided
+    // This helps the frontend know that the process was stopped manually
+    if (ws) {
+      try {
+        ws.send(JSON.stringify({
+          type: 'stopped',
+          message: 'Execution stopped by user'
+        }));
+      } catch (wsErr) {
+        console.error('Error sending stopped message:', wsErr);
       }
     }
     
