@@ -77,6 +77,12 @@ wss.on('connection', (ws) => {
     cleanupSession(sessionId);
   });
   
+  // Create a basic session entry immediately to prevent "No active session" errors
+  activeSessions.set(sessionId, {
+    language: 'python', // Default language
+    initialized: true
+  });
+  
   // Send session ID to client
   ws.send(JSON.stringify({
     type: 'connected',
@@ -175,16 +181,52 @@ async function ensureDockerImage(ws, dockerImage) {
 // Handle code execution
 async function handleCodeExecution(ws, data, sessionId, sessionDir) {
   try {
+    // Notify client that we're starting execution
+    ws.send(JSON.stringify({
+      type: 'output',
+      data: `Starting ${data.language} code execution...\r\n`
+    }));
+    
     // Create session directory if it doesn't exist
     await fs.mkdir(sessionDir, { recursive: true });
     
-    // Write code to file
+    // Get filename based on language
     const filename = getFilename(data.language);
+    
+    // Write code to file
     const filePath = path.join(sessionDir, filename);
     await fs.writeFile(filePath, data.code);
     
-    // Stop any existing container for this session
+    // Get Docker image for the language
+    const dockerImage = getDockerImage(data.language);
+    
+    // Check if Docker image exists locally, pull if not
+    try {
+      await ensureDockerImage(ws, dockerImage);
+    } catch (imageError) {
+      console.error(`Error ensuring Docker image ${dockerImage}:`, imageError);
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: `Failed to prepare Docker image for ${data.language}. Please try again.`
+      }));
+      ws.send(JSON.stringify({
+        type: 'terminated',
+        exitCode: 1
+      }));
+      return;
+    }
+    
+    // Stop any existing execution for this session
     stopExecution(sessionId);
+    
+    // Create container name
+    const containerName = `zad-compiler-${sessionId}`;
+    
+    // Create a new session entry to prevent "No active session" errors
+    activeSessions.set(sessionId, {
+      containerId: containerName,
+      language: data.language
+    });
     
     // Notify client that execution has started
     ws.send(JSON.stringify({
@@ -193,24 +235,6 @@ async function handleCodeExecution(ws, data, sessionId, sessionDir) {
     }));
     
     // Create and run Docker container
-    const containerName = `zad-compiler-${sessionId}`;
-    const dockerImage = getDockerImage(data.language);
-    
-    // Ensure the Docker image is available
-    try {
-      await ensureDockerImage(ws, dockerImage);
-    } catch (imageErr) {
-      console.error('Error ensuring Docker image:', imageErr);
-      ws.send(JSON.stringify({
-        type: 'error',
-        data: `Error preparing Docker image: ${imageErr.message}`
-      }));
-      ws.send(JSON.stringify({
-        type: 'terminated',
-        exitCode: 1
-      }));
-      return;
-    }
     
     // Command to run the code
     const runCommand = getRunCommand(data.language, filename);
@@ -336,23 +360,49 @@ async function handleCodeExecution(ws, data, sessionId, sessionDir) {
 // Handle user input
 function handleUserInput(ws, data, sessionId) {
   const session = activeSessions.get(sessionId);
-  if (session && session.process) {
+  
+  // Check if we have a valid session with a process
+  if (session && session.process && session.process.stdin) {
     console.log('Sending input to process:', data.input);
     // Send the input followed by a newline
     // The input from frontend no longer includes the newline
-    session.process.stdin.write(data.input + '\n');
-    
-    // Send confirmation back to client
-    ws.send(JSON.stringify({
-      type: 'inputProcessed',
-      success: true
-    }));
+    try {
+      session.process.stdin.write(data.input + '\n');
+      
+      // Send confirmation back to client
+      ws.send(JSON.stringify({
+        type: 'inputProcessed',
+        success: true
+      }));
+    } catch (err) {
+      console.error('Error sending input to process:', err);
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Error sending input to process: ' + err.message
+      }));
+    }
   } else {
-    console.log('No active session for input:', sessionId);
-    ws.send(JSON.stringify({
-      type: 'error',
-      message: 'No active execution session'
-    }));
+    console.log('No active process for input in session:', sessionId);
+    
+    // Check if we have a partial session (waiting for Docker)
+    if (session && !session.process) {
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Code execution is still initializing. Please wait a moment and try again.'
+      }));
+    } else if (session) {
+      // We have a session but no process
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'No active code execution. Please run your code first.'
+      }));
+    } else {
+      // No session at all - this shouldn't happen with our initialization
+      ws.send(JSON.stringify({
+        type: 'error',
+        message: 'Session not found. Please refresh the page and try again.'
+      }));
+    }
   }
 }
 
