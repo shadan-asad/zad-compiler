@@ -393,7 +393,9 @@ function App() {
           <select 
             value={language} 
             onChange={handleLanguageChange}
-            className="language-select"
+            className={`language-select ${isRunning ? 'disabled' : ''}`}
+            disabled={isRunning}
+            title={isRunning ? 'Cannot change language while code is running' : 'Select programming language'}
           >
             <option value="python">Python</option>
             <option value="javascript">JavaScript</option>
