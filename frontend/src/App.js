@@ -52,7 +52,13 @@ function App() {
       terminalInstanceRef.current = null;
     }
     
-    if (terminalContainerRef.current) {
+    // Use a delay to ensure DOM is fully rendered before initializing terminal
+    const initializeTerminal = () => {
+      if (!terminalContainerRef.current) {
+        console.error('Terminal container ref not available');
+        return;
+      }
+      
       console.log('Creating new terminal instance');
       // Clear the container first
       terminalContainerRef.current.innerHTML = '';
@@ -72,85 +78,98 @@ function App() {
       const fitAddon = new FitAddon();
       terminal.loadAddon(fitAddon);
       
-      // Open terminal in the container
-      terminal.open(terminalContainerRef.current);
-      
-      // Write initial content to confirm terminal is working
-      terminal.write('Terminal initialized. Ready to run code.\r\n');
-      
-      // Use setTimeout to ensure the DOM is fully rendered before fitting
-      setTimeout(() => {
-        try {
-          if (fitAddon && terminalContainerRef.current) {
-            console.log('Fitting terminal to container');
-            fitAddon.fit();
+      try {
+        // Open terminal in the container
+        terminal.open(terminalContainerRef.current);
+        
+        // Write initial content to confirm terminal is working
+        terminal.write('Terminal initialized. Ready to run code.\r\n');
+        
+        // Store the terminal instance first
+        terminalInstanceRef.current = terminal;
+        
+        // Use a longer delay for the initial fit to ensure DOM is fully ready
+        setTimeout(() => {
+          try {
+            if (fitAddon && terminalContainerRef.current && document.contains(terminalContainerRef.current)) {
+              console.log('Fitting terminal to container');
+              fitAddon.fit();
+            }
+          } catch (err) {
+            console.error('Error fitting terminal:', err);
           }
-        } catch (err) {
-          console.error('Error fitting terminal:', err);
-        }
-      }, 200);
-      
-      // Buffer for input until Enter is pressed
-      const inputBuffer = { text: '', active: false };
-      
-      // Handle user input in terminal
-      terminal.onData((data) => {
-        console.log('Terminal input received:', data, data.charCodeAt(0));
+        }, 500);
         
-        // Check if websocket is available
-        if (!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) {
-          console.error('WebSocket not available for input');
-          return;
-        }
+        // Buffer for input until Enter is pressed
+        const inputBuffer = { text: '', active: false };
         
-        // Handle special characters
-        if (data.charCodeAt(0) === 13) { // Enter key
-          // Send the buffered input to the backend
-          console.log('Enter pressed, sending input:', inputBuffer.text);
-          websocketRef.current.send(JSON.stringify({
-            type: 'input',
-            input: inputBuffer.text,
-            sessionId,
-          }));
+        // Handle user input in terminal
+        terminal.onData((data) => {
+          console.log('Terminal input received:', data, data.charCodeAt(0));
           
-          // Reset the buffer
-          inputBuffer.text = '';
-          terminal.write('\r\n'); // Move to next line in terminal
-        } else if (data.charCodeAt(0) === 127 || data.charCodeAt(0) === 8) { // Backspace
-          if (inputBuffer.text.length > 0) {
-            inputBuffer.text = inputBuffer.text.slice(0, -1);
-            terminal.write('\b \b'); // Erase character in terminal
+          // Check if websocket is available
+          if (!websocketRef.current || websocketRef.current.readyState !== WebSocket.OPEN) {
+            console.error('WebSocket not available for input');
+            return;
           }
-        } else if (data.charCodeAt(0) >= 32) { // Printable characters
-          inputBuffer.text += data;
-          terminal.write(data); // Echo character to terminal
-        }
-      });
-      
-      terminalInstanceRef.current = terminal;
-      
-      // Resize handler with error handling
-      const handleResize = () => {
-        try {
-          if (fitAddon && terminalContainerRef.current) {
-            console.log('Resizing terminal');
-            fitAddon.fit();
+          
+          // Handle special characters
+          if (data.charCodeAt(0) === 13) { // Enter key
+            // Send the buffered input to the backend
+            console.log('Enter pressed, sending input:', inputBuffer.text);
+            websocketRef.current.send(JSON.stringify({
+              type: 'input',
+              input: inputBuffer.text,
+              sessionId,
+            }));
+            
+            // Reset the buffer
+            inputBuffer.text = '';
+            terminal.write('\r\n'); // Move to next line in terminal
+          } else if (data.charCodeAt(0) === 127 || data.charCodeAt(0) === 8) { // Backspace
+            if (inputBuffer.text.length > 0) {
+              inputBuffer.text = inputBuffer.text.slice(0, -1);
+              terminal.write('\b \b'); // Erase character in terminal
+            }
+          } else if (data.charCodeAt(0) >= 32) { // Printable characters
+            inputBuffer.text += data;
+            terminal.write(data); // Echo character to terminal
           }
-        } catch (err) {
-          console.error('Error fitting terminal on resize:', err);
-        }
-      };
-      
-      window.addEventListener('resize', handleResize);
-      
-      return () => {
-        console.log('Cleaning up terminal');
-        window.removeEventListener('resize', handleResize);
-        terminal.dispose();
-      };
-    } else {
-      console.error('Terminal container ref not available');
-    }
+        });
+        
+        // Resize handler with error handling
+        const handleResize = () => {
+          try {
+            if (fitAddon && terminalContainerRef.current && document.contains(terminalContainerRef.current)) {
+              console.log('Resizing terminal');
+              fitAddon.fit();
+            }
+          } catch (err) {
+            console.error('Error fitting terminal on resize:', err);
+          }
+        };
+        
+        window.addEventListener('resize', handleResize);
+        
+        return () => {
+          console.log('Cleaning up terminal');
+          window.removeEventListener('resize', handleResize);
+          if (terminalInstanceRef.current === terminal) {
+            terminalInstanceRef.current = null;
+          }
+          terminal.dispose();
+        };
+      } catch (err) {
+        console.error('Error initializing terminal:', err);
+      }
+    };
+    
+    // Delay terminal initialization to ensure DOM is ready
+    const initTimeout = setTimeout(initializeTerminal, 300);
+    
+    return () => {
+      clearTimeout(initTimeout);
+    };
   }, []);
   
   // Connect to WebSocket
