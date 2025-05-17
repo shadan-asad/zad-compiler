@@ -225,6 +225,15 @@ function App() {
               console.error('Terminal instance not available for terminated message');
             }
             break;
+          case 'stopped':
+            console.log('Execution stopped by user');
+            setIsRunning(false);
+            if (terminalInstanceRef.current) {
+              terminalInstanceRef.current.write('\r\n\x1b[33mExecution stopped by user\x1b[0m\r\n');
+            } else {
+              console.error('Terminal instance not available for stopped message');
+            }
+            break;
           default:
             console.log('Unknown message type:', message.type);
         }
@@ -275,11 +284,19 @@ function App() {
   
   // Handle stopping code execution
   const handleStopCode = () => {
+    console.log('Stop button clicked, sending stop request for session:', sessionId);
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
       websocketRef.current.send(JSON.stringify({
         type: 'stop',
         sessionId,
       }));
+      
+      // Provide immediate feedback to the user
+      if (terminalInstanceRef.current) {
+        terminalInstanceRef.current.write('\r\n\x1b[33mStopping execution...\x1b[0m\r\n');
+      }
+    } else {
+      console.error('WebSocket not available for stop request');
     }
   };
   
