@@ -33,6 +33,9 @@ function App() {
   const [language, setLanguage] = useState('python');
   const [isRunning, setIsRunning] = useState(false);
   const [sessionId, setSessionId] = useState(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [terminalReady, setTerminalReady] = useState(false);
+  const [environmentReady, setEnvironmentReady] = useState(true); // Default to true for initial Python environment
   
   // We don't need terminalRef as we're using terminalInstanceRef instead
   const terminalContainerRef = useRef(null);
@@ -50,6 +53,8 @@ function App() {
       console.log('Disposing existing terminal instance');
       terminalInstanceRef.current.dispose();
       terminalInstanceRef.current = null;
+      // Reset terminal ready state
+      setTerminalReady(false);
     }
     
     // Use a delay to ensure DOM is fully rendered before initializing terminal
@@ -84,6 +89,9 @@ function App() {
         
         // Write initial content to confirm terminal is working
         terminal.write('Terminal initialized. Ready to run code.\r\n');
+        
+        // Mark terminal as ready
+        setTerminalReady(true);
         
         // Store the terminal instance first
         terminalInstanceRef.current = terminal;
@@ -179,31 +187,62 @@ function App() {
       
       ws.onopen = () => {
         console.log('WebSocket connected');
+        setWsConnected(true);
       };
       
       ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
         console.log('WebSocket message received:', message);
         
+        // Store session ID when received from server
+        if (message.type === 'connected' && message.sessionId) {
+          setSessionId(message.sessionId);
+          console.log('Session ID set:', message.sessionId);
+        }
+        
         switch (message.type) {
           case 'connected':
             console.log('Connected with session ID:', message.sessionId);
-            setSessionId(message.sessionId);
+            // Session ID is already set above to ensure it happens immediately
+            // Also mark environment as ready for Python (default language)
+            if (language === 'python') {
+              setEnvironmentReady(true);
+            }
             break;
           case 'output':
             console.log('Output received:', message.data);
             if (terminalInstanceRef.current) {
               terminalInstanceRef.current.write(message.data);
+              
+              // Check for Docker image messages to update environment readiness
+              if (message.data.includes('Docker image') && message.data.includes('not found locally')) {
+                // Docker image is being pulled, environment not ready
+                setEnvironmentReady(false);
+              } else if (message.data.includes('Pulling complete') || message.data.includes('up to date')) {
+                // Docker image pull completed, environment is ready
+                setEnvironmentReady(true);
+                
+                // Clear any pending timeout
+                if (window.lastReadyTimeout) {
+                  clearTimeout(window.lastReadyTimeout);
+                  window.lastReadyTimeout = null;
+                }
+                
+                // Notify user that environment is ready
+                terminalInstanceRef.current.write('\r\n\x1b[32mEnvironment is ready. You can now run your code.\x1b[0m\r\n');
+              }
             } else {
               console.error('Terminal instance not available for output');
             }
             break;
           case 'error':
-            console.log('Error received:', message.data);
+            console.error('Error from server:', message.message || message.data);
             if (terminalInstanceRef.current) {
-              terminalInstanceRef.current.write('\x1b[31m' + message.data + '\x1b[0m');
+              terminalInstanceRef.current.write(`\r\n\x1b[31mError: ${message.message || message.data}\x1b[0m\r\n`);
+              // Reset running state on error
+              setIsRunning(false);
             } else {
-              console.error('Terminal instance not available for error');
+              console.error('Terminal instance not available for error message');
             }
             break;
           case 'started':
@@ -241,6 +280,13 @@ function App() {
       
       ws.onclose = () => {
         console.log('WebSocket disconnected');
+        setWsConnected(false);
+        
+        // Update terminal with disconnection status
+        if (terminalInstanceRef.current) {
+          terminalInstanceRef.current.write('\r\n\x1b[31mDisconnected from server. Attempting to reconnect...\x1b[0m\r\n');
+        }
+        
         // Try to reconnect after a delay
         setTimeout(connectWebSocket, 3000);
       };
@@ -264,13 +310,48 @@ function App() {
   // Handle language change
   const handleLanguageChange = (e) => {
     const newLanguage = e.target.value;
+    const previousLanguage = language;
+    
+    // Set new language and code
     setLanguage(newLanguage);
     setCode(SAMPLE_CODE[newLanguage] || '');
+    
+    // Mark environment as not ready when switching to a different language
+    if (newLanguage !== previousLanguage && newLanguage === 'javascript') {
+      setEnvironmentReady(false);
+      
+      // Reset after 5 seconds to handle case where no environment message is received
+      const readyTimeout = setTimeout(() => {
+        setEnvironmentReady(true);
+      }, 5000);
+      
+      // Store timeout ID for cleanup
+      window.lastReadyTimeout = readyTimeout;
+    }
+    
+    // Inform user about language change
+    if (terminalInstanceRef.current) {
+      if (newLanguage === 'javascript') {
+        terminalInstanceRef.current.write(`\r\n\x1b[36mSwitched to ${newLanguage} mode. Preparing environment (this may take a moment)...\x1b[0m\r\n`);
+        terminalInstanceRef.current.write(`\r\n\x1b[33mPlease wait until the Run button is enabled before executing code.\x1b[0m\r\n`);
+      } else {
+        terminalInstanceRef.current.write(`\r\n\x1b[36mSwitched to ${newLanguage} mode.\x1b[0m\r\n`);
+      }
+    }
   };
   
   // Handle code execution
   const handleRunCode = () => {
     if (websocketRef.current && websocketRef.current.readyState === WebSocket.OPEN) {
+      // Clear terminal before running new code
+      if (terminalInstanceRef.current) {
+        terminalInstanceRef.current.clear();
+        terminalInstanceRef.current.write('Running code...\r\n');
+      }
+      
+      // Set running state
+      setIsRunning(true);
+      
       websocketRef.current.send(JSON.stringify({
         type: 'run',
         code,
@@ -278,7 +359,11 @@ function App() {
         sessionId,
       }));
     } else {
-      alert('WebSocket connection not established. Please try again.');
+      if (terminalInstanceRef.current) {
+        terminalInstanceRef.current.write('\r\n\x1b[31mWebSocket connection not established. Please wait a moment and try again.\x1b[0m\r\n');
+      } else {
+        alert('WebSocket connection not established. Please try again.');
+      }
     }
   };
   
@@ -324,9 +409,17 @@ function App() {
           ) : (
             <button 
               onClick={handleRunCode} 
-              className="control-button run-button"
+              disabled={!wsConnected || !terminalReady || !environmentReady || isRunning}
+              className={`control-button run-button ${(!wsConnected || !terminalReady || !environmentReady) ? 'disabled' : ''}`}
+              title={!terminalReady ? 'Terminal initializing...' : 
+                    !wsConnected ? 'Waiting for connection...' : 
+                    !environmentReady ? 'Preparing environment...' : 
+                    'Run code'}
             >
-              Run
+              {!terminalReady ? 'Initializing...' : 
+               !wsConnected ? 'Connecting...' : 
+               !environmentReady ? 'Preparing...' : 
+               'Run'}
             </button>
           )}
         </div>

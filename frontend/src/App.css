@@ -61,6 +61,17 @@
   background-color: #c0392b;
 }
 
+.control-button.disabled {
+  background-color: #cccccc;
+  color: #666666;
+  cursor: not-allowed;
+}
+
+.control-button.disabled:hover {
+  opacity: 1;
+  background-color: #cccccc;
+}
+
 .main {
   display: flex;
   flex: 1;
