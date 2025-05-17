@@ -83,6 +83,9 @@ wss.on('connection', (ws) => {
   }));
 });
 
+// Maximum execution time in milliseconds (30 seconds)
+const MAX_EXECUTION_TIME = 30000;
+
 // Handle code execution
 async function handleCodeExecution(ws, data, sessionId, sessionDir) {
   try {
@@ -123,10 +126,31 @@ async function handleCodeExecution(ws, data, sessionId, sessionDir) {
     
     const dockerProcess = spawn('docker', dockerArgs);
     
-    // Store process reference
+    // Set up execution timeout
+    const timeoutId = setTimeout(() => {
+      console.log(`Execution timeout reached (${MAX_EXECUTION_TIME}ms) for session ${sessionId}`);
+      
+      // Notify the client
+      ws.send(JSON.stringify({
+        type: 'error',
+        data: `Execution timed out after ${MAX_EXECUTION_TIME/1000} seconds. The process has been terminated.`
+      }));
+      
+      // Terminate the process
+      stopExecution(sessionId);
+      
+      // Send terminated event
+      ws.send(JSON.stringify({
+        type: 'terminated',
+        exitCode: 124 // Standard timeout exit code
+      }));
+    }, MAX_EXECUTION_TIME);
+    
+    // Store process reference and timeout ID
     activeSessions.set(sessionId, {
       process: dockerProcess,
-      containerId: containerName
+      containerId: containerName,
+      timeoutId: timeoutId
     });
     
     // Send output to client
@@ -148,6 +172,13 @@ async function handleCodeExecution(ws, data, sessionId, sessionDir) {
     
     dockerProcess.on('close', (code) => {
       console.log('Docker process closed with code:', code);
+      
+      // Clear the timeout since the process has ended naturally
+      const session = activeSessions.get(sessionId);
+      if (session && session.timeoutId) {
+        clearTimeout(session.timeoutId);
+      }
+      
       ws.send(JSON.stringify({
         type: 'terminated',
         exitCode: code
@@ -159,6 +190,13 @@ async function handleCodeExecution(ws, data, sessionId, sessionDir) {
     
     dockerProcess.on('error', (err) => {
       console.error('Docker process error:', err);
+      
+      // Clear the timeout since the process has errored
+      const session = activeSessions.get(sessionId);
+      if (session && session.timeoutId) {
+        clearTimeout(session.timeoutId);
+      }
+      
       ws.send(JSON.stringify({
         type: 'error',
         data: `Error executing Docker: ${err.message}`
@@ -208,19 +246,46 @@ function handleUserInput(ws, data, sessionId) {
 function stopExecution(sessionId) {
   const session = activeSessions.get(sessionId);
   if (session) {
-    if (session.process) {
-      session.process.kill();
+    console.log(`Stopping execution for session ${sessionId}`);
+    
+    // Clear timeout if it exists
+    if (session.timeoutId) {
+      clearTimeout(session.timeoutId);
     }
     
+    // Kill the process if it exists
+    if (session.process) {
+      try {
+        session.process.kill('SIGKILL');
+      } catch (err) {
+        console.error('Error killing process:', err);
+      }
+    }
+    
+    // Force stop the container if it exists
     if (session.containerId) {
       try {
-        spawn('docker', ['stop', session.containerId]);
+        // Use force flag to ensure container is stopped immediately
+        spawn('docker', ['stop', '--time=0', session.containerId]);
+        console.log(`Container ${session.containerId} stopped`);
+        
+        // Make sure to remove the container if it still exists
+        setTimeout(() => {
+          try {
+            spawn('docker', ['rm', '-f', session.containerId]);
+            console.log(`Container ${session.containerId} removed`);
+          } catch (rmErr) {
+            console.error('Error removing container:', rmErr);
+          }
+        }, 500);
       } catch (err) {
         console.error('Error stopping container:', err);
       }
     }
     
+    // Remove from active sessions
     activeSessions.delete(sessionId);
+    console.log(`Session ${sessionId} removed from active sessions`);
   }
 }
 
