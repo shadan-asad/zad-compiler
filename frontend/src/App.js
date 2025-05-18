@@ -434,6 +434,18 @@ function App() {
       <header className="header">
         <h1>Zad Compiler</h1>
         <div className="controls">
+          <button 
+            onClick={() => {
+              if (terminalInstanceRef.current) {
+                terminalInstanceRef.current.clear();
+                terminalInstanceRef.current.write('Terminal cleared. Ready for new output.\r\n');
+              }
+            }}
+            className="control-button clear-button"
+            title="Clear terminal output"
+          >
+            Clear
+          </button>
           <select 
             value={language} 
             onChange={handleLanguageChange}
