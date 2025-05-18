@@ -108,7 +108,7 @@ async function ensureDockerImage(ws, dockerImage) {
         // Notify client that we're pulling the image
         ws.send(JSON.stringify({
           type: 'output',
-          data: `Docker image ${dockerImage} not found locally. Pulling image (this may take a moment)...\r\n`
+          data: `Setting the environment for ${dockerImage} Please wait...\r\n`
         }));
         
         // Use exec instead of spawn to avoid nodemon watching the process
