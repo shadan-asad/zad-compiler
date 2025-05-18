@@ -26,6 +26,49 @@ readline.question('What is your name? ', name => {
   readline.close();
 });
 `,
+  java: `// Java Sample Code
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+        
+        // Read user input
+        System.out.print("What is your name? ");
+        java.util.Scanner scanner = new java.util.Scanner(System.in);
+        String name = scanner.nextLine();
+        
+        System.out.println("Nice to meet you, " + name + "!");
+        scanner.close();
+    }
+}
+`,
+  c: `#include <stdio.h>
+
+int main() {
+    printf("Hello, World!");
+    
+    // Read user input
+    char name[100];
+    printf("What is your name? ");
+    scanf("%s", name);
+    
+    printf("Nice to meet you, %s!", name);
+    return 0;
+}
+`,
+  cpp: `#include <iostream>
+
+int main() {
+    std::cout << "Hello, World!" << std::endl;
+    
+    // Read user input
+    std::string name;
+    std::cout << "What is your name? ";
+    std::cin >> name;
+    
+    std::cout << "Nice to meet you, " << name << "!" << std::endl;
+    return 0;
+}
+`,
 };
 
 function App() {
@@ -36,6 +79,7 @@ function App() {
   const [wsConnected, setWsConnected] = useState(false);
   const [terminalReady, setTerminalReady] = useState(false);
   const [environmentReady, setEnvironmentReady] = useState(true); // Default to true for initial Python environment
+  const supportedLanguages = ['python', 'javascript', 'java', 'c', 'cpp'];
   
   // We don't need terminalRef as we're using terminalInstanceRef instead
   const terminalContainerRef = useRef(null);
@@ -317,7 +361,7 @@ function App() {
     setCode(SAMPLE_CODE[newLanguage] || '');
     
     // Mark environment as not ready when switching to a different language
-    if (newLanguage !== previousLanguage && newLanguage === 'javascript') {
+    if (newLanguage !== previousLanguage && (supportedLanguages.includes(newLanguage))) {
       setEnvironmentReady(false);
       
       // Reset after 5 seconds to handle case where no environment message is received
@@ -331,7 +375,7 @@ function App() {
     
     // Inform user about language change
     if (terminalInstanceRef.current) {
-      if (newLanguage === 'javascript') {
+      if (supportedLanguages.includes(newLanguage)) {
         terminalInstanceRef.current.write(`\r\n\x1b[36mSwitched to ${newLanguage} mode. Preparing environment (this may take a moment)...\x1b[0m\r\n`);
         terminalInstanceRef.current.write(`\r\n\x1b[33mPlease wait until the Run button is enabled before executing code.\x1b[0m\r\n`);
       } else {
@@ -399,6 +443,10 @@ function App() {
           >
             <option value="python">Python</option>
             <option value="javascript">JavaScript</option>
+            <option value="java">Java</option>
+            <option value="c">C</option>
+            <option value="cpp">C++</option>
+            
           </select>
           
           {isRunning ? (
