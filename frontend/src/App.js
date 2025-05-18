@@ -436,6 +436,18 @@ function App() {
         <div className="controls">
           <button 
             onClick={() => {
+              const sample = SAMPLE_CODE[language];
+              if (sample) {
+                setCode(sample);
+              }
+            }}
+            className="control-button reset-button"
+            title="Reset code to sample"
+          >
+            Reset
+          </button>
+          <button 
+            onClick={() => {
               if (terminalInstanceRef.current) {
                 terminalInstanceRef.current.clear();
                 terminalInstanceRef.current.write('Terminal cleared. Ready for new output.\r\n');
