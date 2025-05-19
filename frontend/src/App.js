@@ -6,7 +6,6 @@ import 'xterm/css/xterm.css';
 import './App.css';
 import { SAMPLE_CODE } from './utils/sample-code';
 
-const BACKEND_URL = 'ws://localhost:3001';
 
 function App() {
   const [code, setCode] = useState(SAMPLE_CODE.python);
@@ -164,7 +163,7 @@ function App() {
   // Connect to WebSocket
   useEffect(() => {
     const connectWebSocket = () => {
-      const ws = new WebSocket(BACKEND_URL);
+      const ws = new WebSocket(process.env.REACT_APP_BACKEND_URL);
       
       ws.onopen = () => {
         console.log('WebSocket connected');
